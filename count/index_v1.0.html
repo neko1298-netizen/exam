@@ -1,0 +1,391 @@
+<!--
+【ChatGPT】：CountTrainer-2025-10-07_130000
+【FileName】：count-trainer.html
+【作成日時】：2025-10-07（JST）
+【概要】：2〜20個の記号（○・●・◆）または画像をランダム散布し、数を数える練習をする単一HTMLアプリ。
+【使い方】：上部で「種類数」「モード」「画像で表示」を設定→「新しい問題」→ 数を入力して「判定」。正解/内訳の表示も可能。
+【仕様】：種類数 1〜3、モード（指定の種類／合計）、非整列ランダム配置（重なり最小化）。画像は最大3つアップロード可。
+【備考】：オフライン動作、外部ライブラリ不使用。GitHub Pagesやローカルでそのまま開けます。
+-->
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Count Trainer – かずを数えよう</title>
+  <style>
+    :root {
+      --bg: #f6fafc;
+      --card: #ffffff;
+      --ink: #0f172a;
+      --muted: #64748b;
+      --accent: #0284c7;
+      --ok: #059669;
+      --bad: #e11d48;
+      --ring: rgba(2,132,199,.25);
+      --radius: 16px;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0; font-family: ui-sans-serif, -apple-system, "Segoe UI", Roboto, "Noto Sans JP",
+      "Hiragino Kaku Gothic ProN", "Yu Gothic", "YuGothic", "Helvetica Neue", Arial, "Apple Color Emoji",
+      "Segoe UI Emoji"; color: var(--ink); background: linear-gradient(#f0f9ff, #fff);
+    }
+    header {
+      position: sticky; top: 0; z-index: 10; backdrop-filter: blur(6px);
+      background: rgba(255,255,255,.7); border-bottom: 1px solid #e2e8f0;
+    }
+    .wrap { max-width: 1000px; margin: 0 auto; padding: 12px 16px; }
+    h1 { font-size: clamp(18px, 2.4vw, 24px); margin: 4px 0 8px; }
+    .controls {
+      display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center;
+    }
+    .controls select, .controls input[type="number"], .controls input[type="text"] {
+      border: 1px solid #cbd5e1; padding: 6px 10px; border-radius: 12px; outline: none;
+    }
+    .btn {
+      border: none; background: var(--accent); color: #fff; padding: 8px 14px;
+      border-radius: 12px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,.08);
+    }
+    .btn:hover { filter: brightness(.95); }
+    .btn:active { transform: translateY(1px); }
+    .btn-grey { background: #334155; }
+    .btn-ok { background: var(--ok); }
+    .panel {
+      background: var(--card); border: 1px solid #e2e8f0; border-radius: var(--radius);
+      padding: 12px; box-shadow: inset 0 0 0 1px rgba(2,132,199,.0);
+    }
+    .hint { color: var(--muted); font-size: 12px; }
+    .stage {
+      height: min(62vh, 720px); position: relative; overflow: hidden;
+      background: #fff; border: 1px solid #e2e8f0; border-radius: var(--radius);
+    }
+    .item {
+      position: absolute; display: flex; align-items: center; justify-content: center;
+      user-select: none; -webkit-user-select: none; line-height: 1;
+    }
+    .bubble { display:inline-flex; align-items:center; justify-content:center;
+      width: 32px; height: 32px; border-radius:999px; background:#e0f2fe; color:#0369a1; }
+    .answer {
+      width: 100%; padding: 10px 12px; border-radius: 12px; border: 1px solid #cbd5e1;
+      outline: none; box-shadow: 0 0 0 0 var(--ring);
+    }
+    .answer.ok { box-shadow: 0 0 0 4px rgba(5,150,105,.25); }
+    .answer.bad { box-shadow: 0 0 0 4px rgba(225,29,72,.2); }
+    .flex { display: flex; gap: 10px; align-items: center; }
+    .grid3 { display:grid; grid-template-columns: repeat(3, 1fr); gap:12px; }
+    .uploader {
+      background: #fff; border: 1px solid #e2e8f0; border-radius: var(--radius); padding: 10px;
+    }
+    .legend {
+      display:flex; flex-wrap:wrap; gap:8px 12px; font-size: 14px; color: var(--muted);
+    }
+    .small { font-size: 12px; color: var(--muted); }
+    .footer-space { height: 30px; }
+    @media (max-width: 560px) { .grid3{ grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <h1>Count Trainer – かずを数えよう</h1>
+      <div class="controls">
+        <div class="flex">
+          <label>種類
+            <select id="typeCount">
+              <option value="random">ランダム</option>
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="3">3</option>
+            </select>
+          </label>
+        </div>
+        <div class="flex">
+          <label>モード
+            <select id="mode">
+              <option value="single">指定の種類を数える</option>
+              <option value="total">合計を数える</option>
+            </select>
+          </label>
+        </div>
+        <label class="flex" style="cursor:pointer">
+          <input type="checkbox" id="useImages">
+          <span>画像で表示</span>
+        </label>
+        <button class="btn" id="btnNew">新しい問題</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="wrap" style="padding-top: 10px;">
+    <section class="panel">
+      <div id="question" style="font-weight:600; font-size: 18px;">
+        合計で <span style="text-decoration:underline dotted">いくつ</span> あるかな？
+      </div>
+      <div class="small">画面にバラバラに配置された 2〜20 個から正しい数を入力してね。</div>
+    </section>
+
+    <section id="uploads" class="grid3" style="margin-top: 10px; display:none;">
+      <div class="uploader">
+        <div style="font-weight:600; margin-bottom:4px;">種類 1 の画像</div>
+        <input type="file" id="img0" accept="image/*">
+        <div style="margin-top:6px;"><img id="prev0" alt="" style="width:64px;height:64px;object-fit:contain;display:none;"></div>
+      </div>
+      <div class="uploader">
+        <div style="font-weight:600; margin-bottom:4px;">種類 2 の画像</div>
+        <input type="file" id="img1" accept="image/*">
+        <div style="margin-top:6px;"><img id="prev1" alt="" style="width:64px;height:64px;object-fit:contain;display:none;"></div>
+      </div>
+      <div class="uploader">
+        <div style="font-weight:600; margin-bottom:4px;">種類 3 の画像</div>
+        <input type="file" id="img2" accept="image/*">
+        <div style="margin-top:6px;"><img id="prev2" alt="" style="width:64px;height:64px;object-fit:contain;display:none;"></div>
+      </div>
+    </section>
+
+    <section class="stage" id="stage" aria-label="散布ステージ"></section>
+
+    <section style="margin-top: 10px;" class="flex">
+      <div style="flex:1;">
+        <label class="small" for="answer">こたえ（半角数字）</label>
+        <input id="answer" class="answer" type="number" inputmode="numeric" placeholder="数を入力">
+      </div>
+      <button class="btn btn-ok" id="btnCheck">判定</button>
+      <button class="btn btn-grey" id="btnReveal">答えを表示</button>
+      <button class="btn" id="btnNext">次の問題</button>
+    </section>
+
+    <section id="result" style="margin-top:6px; min-height: 28px;"></section>
+    <section id="legend" class="legend" style="margin-top:8px;"></section>
+
+    <div class="footer-space"></div>
+    <div class="hint">ヒント：配置は毎回ランダムです。完全な非重なりは保証しませんが、見やすい距離を確保するよう工夫しています。</div>
+  </main>
+
+  <script>
+    // ===== ユーティリティ =====
+    const GLYPHS = ["○","●","◆"];
+    const randInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+    const shuffle = (arr) => { const a=[...arr]; for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];} return a; };
+    function randomPartition(n, t) { // 各>=1
+      if (t<=0) return [];
+      const cuts = new Set();
+      while (cuts.size < t - 1) cuts.add(randInt(1, n - 1));
+      const sorted = [0, ...Array.from(cuts).sort((a,b)=>a-b), n];
+      const parts = [];
+      for (let i=0;i<sorted.length-1;i++) parts.push(sorted[i+1]-sorted[i]);
+      if (parts.some(v=>v<=0)) return randomPartition(n,t);
+      return parts;
+    }
+    function placePoints(count, w, h, size, tries=80) {
+      const pts = [];
+      const r = size * 0.8;
+      const m = size * 0.5;
+      const minX=m, minY=m, maxX=Math.max(m, w-m), maxY=Math.max(m, h-m);
+      for (let i=0;i<count;i++) { 
+        let ok=false;
+        for (let t=0;t<tries;t++) {
+          const x = Math.random()*(maxX-minX)+minX;
+          const y = Math.random()*(maxY-minY)+minY;
+          let good=true;
+          for (const p of pts) { const dx=p.x-x, dy=p.y-y; if (dx*dx+dy*dy < r*r) { good=false; break; } }
+          if (good) { pts.push({x,y}); ok=true; break; }
+        }
+        if (!ok) pts.push({ x: Math.random()*(maxX-minX)+minX, y: Math.random()*(maxY-minY)+minY });
+      }
+      return pts;
+    }
+
+    // ===== DOM 参照 =====
+    const stage = document.getElementById('stage');
+    const question = document.getElementById('question');
+    const result = document.getElementById('result');
+    const legend = document.getElementById('legend');
+
+    const typeCountSel = document.getElementById('typeCount');
+    const modeSel = document.getElementById('mode');
+    const useImagesChk = document.getElementById('useImages');
+    const uploads = document.getElementById('uploads');
+    const answerEl = document.getElementById('answer');
+    const btnNew = document.getElementById('btnNew');
+    const btnCheck = document.getElementById('btnCheck');
+    const btnReveal = document.getElementById('btnReveal');
+    const btnNext = document.getElementById('btnNext');
+
+    const imgInputs = [document.getElementById('img0'), document.getElementById('img1'), document.getElementById('img2')];
+    const imgPrev = [document.getElementById('prev0'), document.getElementById('prev1'), document.getElementById('prev2')];
+    let imgSrcs = [null, null, null];
+
+    // ===== 状態 =====
+    let nItems = 0;
+    let activeTypes = []; // 0..2
+    let targetType = 0;
+    let items = []; // {type,x,y,size}
+    let revealed = false;
+
+    // ===== 画像アップロード処理 =====
+    function handleImageChange(idx, file) {
+      if (!file) { imgSrcs[idx]=null; imgPrev[idx].style.display='none'; imgPrev[idx].src=''; return; }
+      const reader = new FileReader();
+      reader.onload = () => { imgSrcs[idx]=String(reader.result); imgPrev[idx].src=imgSrcs[idx]; imgPrev[idx].style.display='block'; };
+      reader.readAsDataURL(file);
+    }
+    imgInputs.forEach((inp, idx)=> { inp.addEventListener('change', (e)=> handleImageChange(idx, e.target.files?.[0] ?? null)); });
+
+    useImagesChk.addEventListener('change', ()=> {
+      uploads.style.display = useImagesChk.checked ? 'grid' : 'none';
+      renderQuestionText();
+      renderAll();
+    });
+
+    // ===== 出題生成 =====
+    function generateQuestion() {
+      revealed = false;
+      result.textContent = "";
+      answerEl.value = "";
+      answerEl.classList.remove('ok','bad');
+
+      const total = randInt(2,20);
+      const t = typeCountSel.value === 'random' ? randInt(1,3) : Number(typeCountSel.value);
+      const chosen = shuffle([0,1,2]).slice(0,t).sort((a,b)=>a-b);
+
+      nItems = total;
+      activeTypes = chosen;
+      targetType = chosen[randInt(0, t-1)];
+      renderQuestionText();
+      layoutItems();
+      renderAll();
+    }
+
+    // ステージサイズ→散布
+    function layoutItems() {
+      const rect = stage.getBoundingClientRect();
+      const w = rect.width, h = rect.height;
+      const est = Math.sqrt((w*h)/Math.max(1,nItems));
+      const itemSize = Math.max(40, Math.min(96, Math.floor(est*0.6)));
+
+      const counts = randomPartition(nItems, activeTypes.length);
+      const bag = [];
+      activeTypes.forEach((typ, i)=> { for (let k=0;k<counts[i];k++) bag.push(typ); });
+      const shuffled = shuffle(bag);
+      const pts = placePoints(nItems, w, h, itemSize);
+
+      items = shuffled.map((typ, i)=> ({ type: typ, x: pts[i].x, y: pts[i].y, size: itemSize }));
+    }
+
+    function renderQuestionText() {
+      if (modeSel.value === 'total') {
+        question.innerHTML = '合計で <span style="text-decoration:underline dotted">いくつ</span> あるかな？';
+      } else {
+        const showImg = useImagesChk.checked && imgSrcs[targetType];
+        const token = showImg ? '<span class="bubble"><img alt="target" src="'+imgSrcs[targetType]+'" style="width:20px;height:20px;object-fit:contain;"></span>'
+                              : '<span class="bubble">'+GLYPHS[targetType]+'</span>';
+        question.innerHTML = '次のしゅるいを数えてね： ' + token;
+      }
+    }
+
+    function renderAll() {
+      // ステージクリア
+      stage.innerHTML = "";
+      items.forEach((it)=> {
+        const div = document.createElement('div');
+        div.className = 'item';
+        const size = it.size;
+        div.style.left = (it.x - size/2) + 'px';
+        div.style.top = (it.y - size/2) + 'px';
+        div.style.width = size + 'px';
+        div.style.height = size + 'px';
+
+        const useImg = useImagesChk.checked && imgSrcs[it.type];
+        if (useImg) {
+          const img = document.createElement('img');
+          img.alt = 'item';
+          img.src = imgSrcs[it.type];
+          img.style.width = '100%';
+          img.style.height = '100%';
+          img.style.objectFit = 'contain';
+          div.appendChild(img);
+        } else {
+          const span = document.createElement('span');
+          span.textContent = GLYPHS[it.type];
+          span.style.fontSize = Math.floor(size*0.8) + 'px';
+          span.style.lineHeight = '1';
+          div.appendChild(span);
+        }
+        stage.appendChild(div);
+      });
+
+      // 凡例
+      legend.innerHTML = '';
+      [0,1,2].forEach((t)=> {
+        const cnt = items.filter(it=>it.type===t).length;
+        const wrap = document.createElement('div');
+        wrap.className = 'flex';
+        wrap.style.gap = '6px';
+        const bubble = document.createElement('span');
+        bubble.className = 'bubble';
+        if (useImagesChk.checked && imgSrcs[t]) {
+          const im = document.createElement('img');
+          im.src = imgSrcs[t];
+          im.alt = 'type';
+          im.style.width='18px'; im.style.height='18px'; im.style.objectFit='contain';
+          bubble.textContent = '';
+          bubble.appendChild(im);
+        } else {
+          bubble.textContent = GLYPHS[t];
+        }
+        const text = document.createElement('span');
+        text.textContent = '：' + cnt + 'こ';
+        wrap.appendChild(bubble);
+        wrap.appendChild(text);
+        legend.appendChild(wrap);
+      });
+    }
+
+    // 正解値
+    function correctAnswer() {
+      if (modeSel.value === 'total') return nItems;
+      return items.filter(it=>it.type===targetType).length;
+    }
+
+    function checkAnswer() {
+      const v = parseInt(answerEl.value, 10);
+      if (!Number.isFinite(v)) return;
+      const ok = v === correctAnswer();
+      answerEl.classList.remove('ok','bad');
+      answerEl.classList.add(ok ? 'ok' : 'bad');
+      result.innerHTML = ok
+        ? '<div style="display:inline-flex;align-items:center;gap:8px;background:#dcfce7;color:#166534;padding:6px 10px;border-radius:12px;font-weight:600;">正解！よくできました</div>'
+        : '<div style="display:inline-flex;align-items:center;gap:8px;background:#ffe4e6;color:#9f1239;padding:6px 10px;border-radius:12px;font-weight:600;">おしい！もういちど数えてみよう</div>';
+    }
+
+    function reveal() {
+      const ans = correctAnswer();
+      const detail = (modeSel.value === 'total') ? 'すべての合計です。' : '指定の種類の数です。';
+      result.innerHTML = '<div class="panel" style="margin-top:6px;">'
+        + '<div style="font-weight:700;">正解：'+ans+' こ</div>'
+        + '<div class="small" style="margin-top:6px;">'+detail+'</div>'
+        + '</div>';
+    }
+
+    // 監視：リサイズで再レイアウト（数は変えない）
+    let resizeTimer = null;
+    const ro = new ResizeObserver(()=> {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(()=> { if (nItems>0) { layoutItems(); renderAll(); } }, 80);
+    });
+    ro.observe(stage);
+
+    // イベント
+    btnNew.addEventListener('click', generateQuestion);
+    btnNext.addEventListener('click', generateQuestion);
+    btnCheck.addEventListener('click', checkAnswer);
+    btnReveal.addEventListener('click', reveal);
+    answerEl.addEventListener('keydown', (e)=> { if (e.key === 'Enter') checkAnswer(); });
+
+    // 初回
+    generateQuestion();
+  </script>
+</body>
+</html>
