@@ -1,0 +1,270 @@
+<!--
+【ChatGPT】：DiceSumWeb-2025-10-06_14-00-00
+【FileName】：index.html
+【作成日時】：2025-10-06 14:00 (JST)
+【概要】：
+  ローカルのサイコロ画像（./dice/1.png〜6.png または ./dice/1.svg〜）を使って、
+  2個/3個のサイコロの和を制限時間（1,3,5秒）内に回答するWebアプリ。
+  進行状況はプログレスバーで可視化。キーパッドで解答、正誤とタイムアップ表示、
+  スコア（正解数/不正解数/タイムアップ、平均回答時間）を表示。
+【使い方】：
+  1) 同階層に dice フォルダを作り、1.png〜6.png を置く（例：./dice/1.png）。
+  2) 本ファイル（index.html）をダブルクリックで開く（ローカルOK）。
+  3) 画面左上で「サイコロ個数(2/3)」「制限時間(1/3/5秒)」を選び、START。
+  4) 表示されたサイコロの合計を下のキーパッドで入力。正解/不正解/時間切れを記録。
+  5) Vercel等で公開する場合は、この index.html と dice フォルダをアップロードするだけ。
+【仕様】：
+  - 2 or 3 個のサイコロ。制限時間は 1/3/5 秒。
+  - プログレスバーは右→左へ縮小。回答時にストップ、次問でリセット。
+  - キーパッドはサイコロ個数に応じて動的に 2〜12 / 3〜18 を生成。
+  - 正解時は ◯、不正解は ×、時間切れは ⏰ を表示。
+  - スコア集計と平均回答時間（正解のみ）を表示。
+  - 画像は ./dice/{1..6}.(png|jpg|webp|svg) 優先順で探索。
+【関連パッケージ】：
+  - なし（CDNやビルド不要のプレーンHTML/JS）。
+【ライセンス】：
+  - このテンプレートはご自由に改変・商用利用可。
+-->
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>サイコロの和トレーニング</title>
+  <style>
+    :root{--bg:#0f172a;--panel:#111827;--card:#0b1220;--text:#e5e7eb;--muted:#94a3b8;--ok:#22c55e;--ng:#ef4444;--warn:#f59e0b;--accent:#60a5fa}
+    *{box-sizing:border-box}
+    body{margin:0;background:radial-gradient(1200px 800px at 20% -10%,#1f2a44 0%,#0b1220 50%,#05070d 100%);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
+    .wrap{max-width:1100px;margin:24px auto;padding:16px}
+    .toolbar{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+    .card{background:linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.02));border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:14px}
+    label{font-size:14px;color:var(--muted)}
+    select,button{background:#0e1726;border:1px solid rgba(255,255,255,0.12);color:var(--text);border-radius:10px;padding:10px 12px;font-size:14px}
+    button.primary{background:linear-gradient(90deg,#2563eb,#60a5fa);border:0}
+    button:disabled{opacity:.6}
+    .stage{display:grid;grid-template-columns:1.2fr .8fr;gap:16px;margin-top:16px}
+    .dice-area{min-height:320px;display:flex;align-items:center;justify-content:center;gap:18px;flex-wrap:wrap}
+    .dice{width:180px;height:180px;object-fit:contain;filter:drop-shadow(0 10px 18px rgba(0,0,0,.45))}
+    .bar{height:16px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);overflow:hidden;border-radius:999px}
+    .bar > .fill{height:100%;width:100%;background:linear-gradient(90deg,#16a34a,#22c55e,#f59e0b,#ef4444);transform-origin:right center}
+    .hud{display:flex;justify-content:space-between;align-items:center;gap:12px}
+    .sum{font-size:28px;color:var(--muted)}
+    .result{font-size:28px}
+    .ok{color:var(--ok)}.ng{color:var(--ng)}.to{color:var(--warn)}
+    .pad{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}
+    .pad button{padding:14px 0;font-size:18px;border-radius:12px}
+    .score{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+    .chip{background:#0e1726;border:1px solid rgba(255,255,255,0.1);padding:10px;border-radius:12px;text-align:center}
+    .big{font-size:18px}
+    @media (max-width:900px){.stage{grid-template-columns:1fr;}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="toolbar card">
+      <div>
+        <label>サイコロの数</label><br/>
+        <select id="diceCount">
+          <option value="2">2 個</option>
+          <option value="3">3 個</option>
+        </select>
+      </div>
+      <div>
+        <label>制限時間</label><br/>
+        <select id="timeLimit">
+          <option value="1">1 秒（最難）</option>
+          <option value="3" selected>3 秒（標準）</option>
+          <option value="5">5 秒（やさしめ）</option>
+        </select>
+      </div>
+      <div>
+        <label>出題方式</label><br/>
+        <select id="mode">
+          <option value="random">ランダム</option>
+          <option value="noRepeat">直前と同和を避ける</option>
+        </select>
+      </div>
+      <div style="margin-left:auto;display:flex;gap:8px">
+        <button id="startBtn" class="primary">START</button>
+        <button id="stopBtn">STOP</button>
+      </div>
+    </div>
+
+    <div class="stage">
+      <div class="card">
+        <div class="hud" style="margin-bottom:10px">
+          <div class="sum" id="sumHint">合計： ?</div>
+          <div class="bar" style="flex:1">
+            <div id="barFill" class="fill"></div>
+          </div>
+          <div class="result" id="judge"></div>
+        </div>
+        <div id="diceArea" class="dice-area"></div>
+      </div>
+
+      <div class="card">
+        <div style="margin-bottom:8px;color:var(--muted)">解答（タップ）</div>
+        <div id="pad" class="pad"></div>
+        <div style="margin-top:12px" class="score">
+          <div class="chip"><div>正解</div><div class="big" id="okCnt">0</div></div>
+          <div class="chip"><div>不正解</div><div class="big" id="ngCnt">0</div></div>
+          <div class="chip"><div>時間切れ</div><div class="big" id="toCnt">0</div></div>
+          <div class="chip"><div>平均時間</div><div class="big" id="avgTime">-</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // 画像のパス解決：./dice/1.(png|jpg|webp|svg)
+    async function resolveDiceSrc(n){
+  // file:// 直開きでも動くよう fetch(HEAD) ではなく Image.onload/onerror で存在確認
+  const cands = [
+    `${n}.png`, `${n}.webp`, `${n}.jpg`, `${n}.jpeg`, `${n}.svg`,
+    `dice/${n}.png`, `dice/${n}.webp`, `dice/${n}.jpg`, `dice/${n}.jpeg`, `dice/${n}.svg`
+  ];
+  for (const p of cands){
+    const ok = await new Promise(res=>{
+      const im = new Image();
+      im.onload = ()=>res(true);
+      im.onerror = ()=>res(false);
+      im.src = p;
+    });
+    if(ok) return p;
+  }
+  return '';
+}
+
+    const state = {
+      diceCount: 2,
+      timeLimit: 3,
+      running: false,
+      current:{values:[], sum:0, start:0},
+      lastSum: null,
+      timerId:null,
+      barId:null,
+      stats:{ok:0, ng:0, to:0, times:[]}
+    };
+
+    const elDice = document.getElementById('diceArea');
+    const elPad = document.getElementById('pad');
+    const elJudge = document.getElementById('judge');
+    const elHint = document.getElementById('sumHint');
+    const elBar = document.getElementById('barFill');
+    const elOk = document.getElementById('okCnt');
+    const elNg = document.getElementById('ngCnt');
+    const elTo = document.getElementById('toCnt');
+    const elAvg = document.getElementById('avgTime');
+
+    document.getElementById('diceCount').addEventListener('change',e=>{state.diceCount=+e.target.value;buildPad();});
+    document.getElementById('timeLimit').addEventListener('change',e=>{state.timeLimit=+e.target.value;});
+    document.getElementById('startBtn').addEventListener('click',()=>{start();});
+    document.getElementById('stopBtn').addEventListener('click',()=>{stop();});
+
+    function buildPad(){
+      elPad.innerHTML='';
+      const min = state.diceCount===2?2:3;
+      const max = state.diceCount===2?12:18;
+      for(let n=min;n<=max;n++){
+        const b=document.createElement('button');
+        b.textContent=n;
+        b.addEventListener('click',()=>answer(n));
+        elPad.appendChild(b);
+      }
+    }
+
+    function rndInt(a,b){return Math.floor(Math.random()*(b-a+1))+a}
+
+    async function roll(){
+      const want = state.diceCount;
+      const vals = Array.from({length:want},()=>rndInt(1,6));
+      const sum = vals.reduce((a,b)=>a+b,0);
+      // 直前と同じ和を避けるモード
+      const mode = document.getElementById('mode').value;
+      if(mode==='noRepeat' && state.lastSum!==null && sum===state.lastSum){
+        return roll();
+      }
+      state.current={values:vals,sum,start:performance.now()};
+      state.lastSum=sum;
+      await draw(vals);
+      runBar(state.timeLimit);
+      elHint.textContent='合計： ?';
+      elJudge.textContent='';
+    }
+
+    async function draw(vals){
+      elDice.innerHTML='';
+      for(const v of vals){
+        const img=document.createElement('img');
+        img.className='dice';
+        img.alt=`${v}`;
+        img.src= await resolveDiceSrc(v) || '';
+        elDice.appendChild(img);
+      }
+    }
+
+    function runBar(sec){
+      if(state.barId) cancelAnimationFrame(state.barId);
+      const start=performance.now();
+      const dur=sec*1000;
+      function step(){
+        const p=(performance.now()-start)/dur;
+        const w=Math.max(0,1-p);
+        elBar.style.transform=`scaleX(${w})`;
+        if(p>=1){ timesUp(); return; }
+        state.barId=requestAnimationFrame(step);
+      }
+      step();
+    }
+
+    function timesUp(){
+      elBar.style.transform='scaleX(0)';
+      elJudge.textContent='⏰';
+      elJudge.className='result to';
+      state.stats.to++;
+      updateStats();
+      nextSoon();
+    }
+
+    function answer(n){
+      if(!state.running) return;
+      const t=(performance.now()-state.current.start)/1000;
+      if(n===state.current.sum){
+        elJudge.textContent='◯';
+        elJudge.className='result ok';
+        state.stats.ok++; state.stats.times.push(t);
+      }else{
+        elJudge.textContent=`×（正解 ${state.current.sum}）`;
+        elJudge.className='result ng';
+        state.stats.ng++;
+      }
+      elHint.textContent=`合計： ${state.current.sum}`;
+      updateStats();
+      nextSoon();
+    }
+
+    function updateStats(){
+      elOk.textContent=state.stats.ok;
+      elNg.textContent=state.stats.ng;
+      elTo.textContent=state.stats.to;
+      if(state.stats.times.length){
+        const avg=(state.stats.times.reduce((a,b)=>a+b,0)/state.stats.times.length).toFixed(2);
+        elAvg.textContent=`${avg}s`;
+      }else{ elAvg.textContent='-'; }
+    }
+
+    function nextSoon(){
+      cancelAnimationFrame(state.barId);
+      setTimeout(()=>{ if(state.running) roll(); }, 600);
+    }
+
+    function start(){
+      if(state.running) return; state.running=true; buildPad(); roll();
+    }
+    function stop(){ state.running=false; cancelAnimationFrame(state.barId); }
+
+    // 初期パッド
+    buildPad();
+  </script>
+</body>
+</html>
